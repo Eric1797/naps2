@@ -48,7 +48,37 @@ jobs:
           if (Test-Path portable/App/_win32/naps2_jpeg.dll) { Copy-Item portable/App/_win32/naps2_jpeg.dll portable/App/ -Force }
           New-Item -ItemType Directory -Path portable/Data -Force | Out-Null
           Copy-Item LICENSE portable/license.txt -Force
-          Compress-Archive -Path portable/* -DestinationPath NAPS2-portable-win-x64.zip -Force
+
+      - name: Trim unused framework files (mirrors excludeDlls in NAPS2.Tools PackageCommand)
+        shell: pwsh
+        run: |
+          $excludes = @('Microsoft.VisualBasic','System.Data','System.Private.DataContract','System.Windows.Forms.Design','D3D','Presentation','Reach','System.Windows.Controls.Ribbon','System.Windows.Input','System.Windows.Presentation','System.Xaml','UIAutomation','WindowsBase','wpfgfx','createdump','Microsoft.DiaSymReader','mscordaccore','mscordbi')
+          function Is-Excluded($name) { foreach ($e in $excludes) { if ($name.StartsWith($e)) { return $true } } return $false }
+          # Remove trimmed entries from deps.json so it matches the files on disk
+          Get-ChildItem portable/App/*.deps.json | ForEach-Object {
+            $deps = Get-Content $_.FullName -Raw | ConvertFrom-Json -Depth 100
+            foreach ($targetProp in $deps.targets.PSObject.Properties) {
+              foreach ($libProp in $targetProp.Value.PSObject.Properties) {
+                foreach ($section in @('runtime','resources','native')) {
+                  $secProp = $libProp.Value.PSObject.Properties | Where-Object { $_.Name -eq $section }
+                  if ($secProp) {
+                    foreach ($k in @($secProp.Value.PSObject.Properties.Name)) {
+                      if (Is-Excluded ($k.Split('/')[-1])) { $secProp.Value.PSObject.Properties.Remove($k) }
+                    }
+                  }
+                }
+              }
+            }
+            $deps | ConvertTo-Json -Depth 100 | Set-Content $_.FullName -NoNewline
+          }
+          # Delete the trimmed files from disk
+          Get-ChildItem portable/App/*.exe | Where-Object { $_.Name -ne 'NAPS2.Worker.exe' -and (Is-Excluded $_.Name) } | Remove-Item -Force
+          Get-ChildItem portable/App/*.dll | Where-Object { Is-Excluded $_.Name } | Remove-Item -Force
+          Get-ChildItem portable/App -Directory | Where-Object { $_.Name -match '^[a-z]{2}(-[A-Za-z]+)?$' } | Get-ChildItem -Filter *.resources.dll | Where-Object { Is-Excluded $_.Name } | Remove-Item -Force
+
+      - name: Zip portable build
+        shell: pwsh
+        run: Compress-Archive -Path portable/* -DestinationPath NAPS2-portable-win-x64.zip -Force
 
       - name: Upload portable zip
         uses: actions/upload-artifact@v4
