@@ -1,0 +1,54 @@
+name: Windows EXE
+
+# Windows-only build: compiles the WinForms desktop app (NAPS2.exe)
+# plus its background worker (NAPS2.Worker.exe) and uploads them as artifacts.
+# Use this while redesigning / adding features; other platforms are skipped for now.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish worker (win-x86, single file)
+        run: dotnet publish NAPS2.App.Worker -c Release /p:DebugType=None /p:DebugSymbols=false -o out/worker
+
+      - name: Publish Windows app (win-x64)
+        run: dotnet publish NAPS2.App.WinForms -r win-x64 -c Release --self-contained true /p:DebugType=None /p:DebugSymbols=false -o out/windows-x64
+
+      - name: Copy worker next to app
+        shell: pwsh
+        run: Copy-Item out/worker/NAPS2.Worker.exe out/windows-x64/ -Force
+
+      - name: Zip output
+        shell: pwsh
+        run: Compress-Archive -Path out/windows-x64/* -DestinationPath NAPS2-windows-x64.zip -Force
+
+      - name: Upload EXE artifact (folder)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NAPS2-windows-x64
+          path: out/windows-x64/
+          if-no-files-found: error
+
+      - name: Upload EXE artifact (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: NAPS2-windows-x64-zip
+          path: NAPS2-windows-x64.zip
+          if-no-files-found: error
