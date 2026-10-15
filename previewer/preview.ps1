@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 NAPS2 Design Previewer - zero-install, zero-compile live viewer.
 Runs on built-in Windows PowerShell + .NET Framework WinForms. No SDK needed.
@@ -68,7 +68,7 @@ function Load-Image($path) {
     $fs = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
     try {
         $ms = New-Object IO.MemoryStream
-        try { $fs.CopyTo($ms); $ms.Position = 0; $img = [Drawing.Image]::FromStream($ms) }
+        try { $fs.CopyTo($ms); $ms.Position = 0; $img = [System.Drawing.Image]::FromStream($ms) }
         finally { $ms.Dispose() }
     } finally { $fs.Dispose() }
     $script:LoadedImages += $img
@@ -77,19 +77,19 @@ function Load-Image($path) {
 
 function Resize-Image($img, $size) {
     if ($img.Width -eq $size -and $img.Height -eq $size) { return $img }
-    $bmp = New-Object Drawing.Bitmap($size, $size)
-    $g = [Drawing.Graphics]::FromImage($bmp)
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
     try { $g.DrawImage($img, 0, 0, $size, $size) } finally { $g.Dispose() }
     $script:LoadedImages += $bmp
     return $bmp
 }
 
 function Placeholder($size) {
-    $bmp = New-Object Drawing.Bitmap($size, $size)
-    $g = [Drawing.Graphics]::FromImage($bmp)
+    $bmp = New-Object System.Drawing.Bitmap($size, $size)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
     try {
-        $g.Clear([Drawing.Color]::Magenta)
-        $g.DrawString('?', (New-Object Drawing.Font('Arial', $size * 0.7)), [Drawing.Brushes]::Black, 0, 0)
+        $g.Clear([System.Drawing.Color]::Magenta)
+        $g.DrawString('?', (New-Object System.Drawing.Font('Arial', $size * 0.7)), [System.Drawing.Brushes]::Black, 0, 0)
     } finally { $g.Dispose() }
     $script:LoadedImages += $bmp
     return $bmp
@@ -126,7 +126,7 @@ function Eval-Color($expr, $named) {
     return $null
 }
 function Hex-ToColor($hex) {
-    return [Drawing.Color]::FromArgb([Convert]::ToInt32($hex.Substring(0,2),16), [Convert]::ToInt32($hex.Substring(2,2),16), [Convert]::ToInt32($hex.Substring(4,2),16))
+    return [System.Drawing.Color]::FromArgb([Convert]::ToInt32($hex.Substring(0,2),16), [Convert]::ToInt32($hex.Substring(2,2),16), [Convert]::ToInt32($hex.Substring(4,2),16))
 }
 
 function Toolbar-IconNames {
@@ -165,44 +165,44 @@ if ($SelfTest) {
 # --- GUI ---
 $script:Dark = $false; $script:Hires = $false
 
-$form = New-Object Forms.Form
+$form = New-Object System.Windows.Forms.Form
 $form.Text = 'NAPS2 Design Previewer (edit PNGs/CS, hit Refresh - no build)'
 $form.Width = 1100; $form.Height = 750
 
-$top = New-Object Forms.ToolStrip
+$top = New-Object System.Windows.Forms.ToolStrip
 $top.Dock = 'Top'; $top.GripStyle = 'Hidden'
-$btnRefresh = New-Object Forms.ToolStripButton('Refresh')
-$btnDark = New-Object Forms.ToolStripButton('Dark: off'); $btnDark.CheckOnClick = $true
-$btnHires = New-Object Forms.ToolStripButton('HiDPI: off'); $btnHires.CheckOnClick = $true
+$btnRefresh = New-Object System.Windows.Forms.ToolStripButton('Refresh')
+$btnDark = New-Object System.Windows.Forms.ToolStripButton('Dark: off'); $btnDark.CheckOnClick = $true
+$btnHires = New-Object System.Windows.Forms.ToolStripButton('HiDPI: off'); $btnHires.CheckOnClick = $true
 $top.Items.Add($btnRefresh) | Out-Null
-$top.Items.Add((New-Object Forms.ToolStripSeparator)) | Out-Null
+$top.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $top.Items.Add($btnDark) | Out-Null
 $top.Items.Add($btnHires) | Out-Null
 
-$tabs = New-Object Forms.TabControl
+$tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Dock = 'Fill'
 
 # Toolbar tab
-$tabToolbar = New-Object Forms.TabPage('Toolbar')
-$mockBar = New-Object Forms.ToolStrip
+$tabToolbar = New-Object System.Windows.Forms.TabPage('Toolbar')
+$mockBar = New-Object System.Windows.Forms.ToolStrip
 $mockBar.Dock = 'Top'; $mockBar.GripStyle = 'Hidden'
-$pageArea = New-Object Forms.Panel
+$pageArea = New-Object System.Windows.Forms.Panel
 $pageArea.Dock = 'Fill'; $pageArea.BackColor = 'White'
 $tabToolbar.Controls.Add($pageArea); $tabToolbar.Controls.Add($mockBar)
 
 # Icons tab
-$tabIcons = New-Object Forms.TabPage('Icons')
-$searchBox = New-Object Forms.TextBox
+$tabIcons = New-Object System.Windows.Forms.TabPage('Icons')
+$searchBox = New-Object System.Windows.Forms.TextBox
 $searchBox.Dock = 'Top'
-$searchLabel = New-Object Forms.Label
+$searchLabel = New-Object System.Windows.Forms.Label
 $searchLabel.Text = 'Search:'; $searchLabel.Dock = 'Top'; $searchLabel.Height = 18
-$iconFlow = New-Object Forms.FlowLayoutPanel
+$iconFlow = New-Object System.Windows.Forms.FlowLayoutPanel
 $iconFlow.Dock = 'Fill'; $iconFlow.AutoScroll = $true
 $tabIcons.Controls.Add($iconFlow); $tabIcons.Controls.Add($searchBox); $tabIcons.Controls.Add($searchLabel)
 
 # Palette tab
-$tabPalette = New-Object Forms.TabPage('Palette')
-$palFlow = New-Object Forms.FlowLayoutPanel
+$tabPalette = New-Object System.Windows.Forms.TabPage('Palette')
+$palFlow = New-Object System.Windows.Forms.FlowLayoutPanel
 $palFlow.Dock = 'Fill'; $palFlow.AutoScroll = $true; $palFlow.FlowDirection = 'TopDown'; $palFlow.WrapContents = $false
 $tabPalette.Controls.Add($palFlow)
 
@@ -210,43 +210,43 @@ $tabs.TabPages.Add($tabToolbar) | Out-Null
 $tabs.TabPages.Add($tabIcons) | Out-Null
 $tabs.TabPages.Add($tabPalette) | Out-Null
 
-$status = New-Object Forms.StatusStrip
-$statusLabel = New-Object Forms.ToolStripStatusLabel
+$status = New-Object System.Windows.Forms.StatusStrip
+$statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
 $statusLabel.Spring = $true
 $status.Items.Add($statusLabel) | Out-Null
 
 function Refresh-Toolbar {
     $mockBar.Items.Clear()
     $size = if ($script:Hires) { 32 } else { 16 }
-    $mockBar.ImageScalingSize = New-Object Drawing.Size($size, $size)
-    $mockBar.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [Drawing.SystemColors]::Control }
-    $mockBar.ForeColor = if ($script:Dark) { [Drawing.Color]::White } else { [Drawing.SystemColors]::ControlText }
+    $mockBar.ImageScalingSize = New-Object System.Drawing.Size($size, $size)
+    $mockBar.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.SystemColors]::Control }
+    $mockBar.ForeColor = if ($script:Dark) { [System.Drawing.Color]::White } else { [System.Drawing.SystemColors]::ControlText }
     $missing = @()
     foreach ($b in $Toolbar) {
-        if ($b.ContainsKey('Sep')) { $mockBar.Items.Add((New-Object Forms.ToolStripSeparator)) | Out-Null; continue }
+        if ($b.ContainsKey('Sep')) { $mockBar.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null; continue }
         if (-not (Get-IconFile $b.Icon)) { $missing += $b.Icon }
         $img = Icon-For $b.Icon $size $script:Hires
         if ($b.Menu) {
-            $drop = New-Object Forms.ToolStripDropDownButton($b.Text, $img)
+            $drop = New-Object System.Windows.Forms.ToolStripDropDownButton($b.Text, $img)
             $drop.TextImageRelation = 'ImageAboveText'; $drop.ForeColor = $mockBar.ForeColor
             foreach ($m in $b.Menu) {
-                if ($m.ContainsKey('Sep')) { $drop.DropDownItems.Add((New-Object Forms.ToolStripSeparator)) | Out-Null; continue }
+                if ($m.ContainsKey('Sep')) { $drop.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null; continue }
                 $MenuItem = $null
                 if ($m.Icon) { if (-not (Get-IconFile $m.Icon)) { $missing += $m.Icon }; $MenuItem = Icon-For $m.Icon 16 $false }
-                $drop.DropDownItems.Add((New-Object Forms.ToolStripMenuItem($m.Text, $MenuItem))) | Out-Null
+                $drop.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripMenuItem($m.Text, $MenuItem))) | Out-Null
             }
             $mockBar.Items.Add($drop) | Out-Null
         } else {
-            $btn = New-Object Forms.ToolStripButton($b.Text, $img)
+            $btn = New-Object System.Windows.Forms.ToolStripButton($b.Text, $img)
             $btn.TextImageRelation = 'ImageAboveText'; $btn.ForeColor = $mockBar.ForeColor
             $mockBar.Items.Add($btn) | Out-Null
         }
     }
-    $pageArea.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [Drawing.Color]::White }
+    $pageArea.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.Color]::White }
     $pageArea.Controls.Clear()
-    $hint = New-Object Forms.Label
+    $hint = New-Object System.Windows.Forms.Label
     $hint.Dock = 'Fill'; $hint.TextAlign = 'MiddleCenter'
-    $hint.ForeColor = if ($script:Dark) { [Drawing.Color]::White } else { [Drawing.Color]::Black }
+    $hint.ForeColor = if ($script:Dark) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::Black }
     $t = "Thumbnail area (placeholder)`n`nEdit PNGs in NAPS2.Lib\Icons or colors in ColorScheme.cs,`nthen hit Refresh - no rebuild needed."
     if ($missing.Count -gt 0) { $t += "`n`nMissing icons: " + (($missing | Sort-Object -Unique) -join ', ') }
     $hint.Text = $t
@@ -257,16 +257,16 @@ function Refresh-Icons {
     $iconFlow.SuspendLayout()
     $iconFlow.Controls.Clear()
     $filter = $searchBox.Text.Trim()
-    $bg = if ($script:Dark) { Hex-ToColor '262626' } else { [Drawing.Color]::White }
+    $bg = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.Color]::White }
     foreach ($f in (Get-ChildItem $IconsDir -Filter *.png | Sort-Object Name)) {
         if ($filter -and $f.Name -notlike "*$filter*") { continue }
         $img = Load-Image $f.FullName
-        $box = New-Object Forms.PictureBox
-        $box.Image = $img; $box.Size = New-Object Drawing.Size(40, 40)
+        $box = New-Object System.Windows.Forms.PictureBox
+        $box.Image = $img; $box.Size = New-Object System.Drawing.Size(40, 40)
         $box.SizeMode = 'CenterImage'; $box.BackColor = $bg; $box.BorderStyle = 'FixedSingle'
-        $label = New-Object Forms.Label
+        $label = New-Object System.Windows.Forms.Label
         $label.Text = $f.Name; $label.Width = 120; $label.Height = 28; $label.TextAlign = 'TopCenter'
-        $cell = New-Object Forms.FlowLayoutPanel
+        $cell = New-Object System.Windows.Forms.FlowLayoutPanel
         $cell.FlowDirection = 'TopDown'; $cell.WrapContents = $false; $cell.Width = 128; $cell.Height = 76
         $cell.Controls.Add($box) | Out-Null; $cell.Controls.Add($label) | Out-Null
         $iconFlow.Controls.Add($cell) | Out-Null
@@ -279,26 +279,26 @@ function Refresh-Palette {
     $palFlow.Controls.Clear()
     $pal = Parse-Colors
     foreach ($s in $pal.Swatches) {
-        $row = New-Object Forms.FlowLayoutPanel
+        $row = New-Object System.Windows.Forms.FlowLayoutPanel
         $row.FlowDirection = 'LeftToRight'; $row.WrapContents = $false; $row.Height = 34; $row.Width = 620
-        $name = New-Object Forms.Label
+        $name = New-Object System.Windows.Forms.Label
         $name.Text = $s.Name; $name.Width = 220; $name.TextAlign = 'MiddleLeft'
         $row.Controls.Add($name) | Out-Null
         foreach ($mode in @(@{ N = 'Light'; H = $s.Light }, @{ N = 'Dark'; H = $s.Dark })) {
             $c = Hex-ToColor $mode.H
-            $p = New-Object Forms.Panel
+            $p = New-Object System.Windows.Forms.Panel
             $p.BackColor = $c; $p.Width = 170; $p.Height = 28; $p.BorderStyle = 'FixedSingle'
-            $l = New-Object Forms.Label
+            $l = New-Object System.Windows.Forms.Label
             $l.Text = "$($mode.N) #$($mode.H)"; $l.Dock = 'Fill'; $l.TextAlign = 'MiddleCenter'; $l.BackColor = 'Transparent'
             $lum = $c.R * 0.299 + $c.G * 0.587 + $c.B * 0.114
-            $l.ForeColor = if ($lum -gt 150) { [Drawing.Color]::Black } else { [Drawing.Color]::White }
+            $l.ForeColor = if ($lum -gt 150) { [System.Drawing.Color]::Black } else { [System.Drawing.Color]::White }
             $p.Controls.Add($l)
             $row.Controls.Add($p) | Out-Null
         }
         $palFlow.Controls.Add($row) | Out-Null
     }
     foreach ($w in $pal.Warnings) {
-        $wl = New-Object Forms.Label; $wl.Text = $w; $wl.ForeColor = 'Red'; $wl.AutoSize = $true
+        $wl = New-Object System.Windows.Forms.Label; $wl.Text = $w; $wl.ForeColor = 'Red'; $wl.AutoSize = $true
         $palFlow.Controls.Add($wl) | Out-Null
     }
     $palFlow.ResumeLayout()
