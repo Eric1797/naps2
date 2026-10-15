@@ -65,14 +65,25 @@ function Get-IconFile($name, [switch]$Hires) {
 $script:LoadedImages = @()
 function Load-Image($path) {
     if (-not $path) { return $null }
-    $fs = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
     try {
-        $ms = New-Object IO.MemoryStream
-        try { $fs.CopyTo($ms); $ms.Position = 0; $img = [System.Drawing.Image]::FromStream($ms) }
-        finally { $ms.Dispose() }
-    } finally { $fs.Dispose() }
-    $script:LoadedImages += $img
-    return $img
+        $fs = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite')
+        try {
+            $ms = New-Object IO.MemoryStream
+            try {
+                $fs.CopyTo($ms); $ms.Position = 0
+                $src = [System.Drawing.Image]::FromStream($ms)
+                try {
+                    # Deep-copy so the image is detached from the (soon closed) stream.
+                    # Without this, Button painting can throw "Parameter is not valid".
+                    $bmp = New-Object System.Drawing.Bitmap($src)
+                } finally { $src.Dispose() }
+            } finally { $ms.Dispose() }
+        } finally { $fs.Dispose() }
+    } catch {
+        return $null
+    }
+    $script:LoadedImages += $bmp
+    return $bmp
 }
 
 function Resize-Image($img, $size) {
@@ -136,6 +147,7 @@ function Toolbar-IconNames {
         $set[$b.Icon] = $true
         foreach ($m in ($b.Menu | Where-Object { $_ -and -not $_.ContainsKey('Sep') })) { if ($m.Icon) { $set[$m.Icon] = $true } }
     }
+    foreach ($extra in @('control_play_blue_small', 'pencil_small', 'add_small', 'scanner-96', 'application_side_list_small', 'zoom_in_small', 'zoom_out_small')) { $set[$extra] = $true }
     return @($set.Keys | Sort-Object)
 }
 
@@ -182,13 +194,37 @@ $top.Items.Add($btnHires) | Out-Null
 $tabs = New-Object System.Windows.Forms.TabControl
 $tabs.Dock = 'Fill'
 
-# Toolbar tab
-$tabToolbar = New-Object System.Windows.Forms.TabPage('Toolbar')
+# Main-window tab (mirrors WinFormsDesktopForm: main toolbar, profiles toolbar,
+# sidebar with profile/device/scan settings, thumbnail area, zoom controls)
+$tabToolbar = New-Object System.Windows.Forms.TabPage('Main Window')
 $mockBar = New-Object System.Windows.Forms.ToolStrip
 $mockBar.Dock = 'Top'; $mockBar.GripStyle = 'Hidden'
-$pageArea = New-Object System.Windows.Forms.Panel
-$pageArea.Dock = 'Fill'; $pageArea.BackColor = 'White'
-$tabToolbar.Controls.Add($pageArea); $tabToolbar.Controls.Add($mockBar)
+$profilesBar = New-Object System.Windows.Forms.ToolStrip
+$profilesBar.Dock = 'Top'; $profilesBar.GripStyle = 'Hidden'
+$sepLine = New-Object System.Windows.Forms.Panel
+$sepLine.Dock = 'Top'; $sepLine.Height = 1
+$split = New-Object System.Windows.Forms.SplitContainer
+$split.Dock = 'Fill'; $split.SplitterDistance = 235; $split.FixedPanel = 'Panel1'; $split.SplitterWidth = 4
+$sidebarScroll = New-Object System.Windows.Forms.Panel
+$sidebarScroll.Dock = 'Fill'; $sidebarScroll.AutoScroll = $true; $sidebarScroll.Padding = '10,8,10,8'
+$contentPanel = New-Object System.Windows.Forms.Panel
+$contentPanel.Dock = 'Fill'
+$thumbFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+$thumbFlow.Dock = 'Fill'; $thumbFlow.AutoScroll = $true; $thumbFlow.Padding = New-Object System.Windows.Forms.Padding(12)
+$bottomBar = New-Object System.Windows.Forms.Panel
+$bottomBar.Dock = 'Bottom'; $bottomBar.Height = 32
+$script:SampleProfiles = @('G3070 series', 'Test Profile')
+$script:SelectedThumb = 0
+$script:ZoomLevels = @(50, 100, 150, 200); $script:ZoomIdx = 1
+$script:Swatches = @()
+$split.Panel1.Controls.Add($sidebarScroll)
+$contentPanel.Controls.Add($thumbFlow)
+$contentPanel.Controls.Add($bottomBar)
+$split.Panel2.Controls.Add($contentPanel)
+$tabToolbar.Controls.Add($split)
+$tabToolbar.Controls.Add($sepLine)
+$tabToolbar.Controls.Add($profilesBar)
+$tabToolbar.Controls.Add($mockBar)
 
 # Icons tab
 $tabIcons = New-Object System.Windows.Forms.TabPage('Icons')
@@ -221,10 +257,10 @@ function Refresh-Toolbar {
     $mockBar.ImageScalingSize = New-Object System.Drawing.Size($size, $size)
     $mockBar.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.SystemColors]::Control }
     $mockBar.ForeColor = if ($script:Dark) { [System.Drawing.Color]::White } else { [System.Drawing.SystemColors]::ControlText }
-    $missing = @()
+    $missing = New-Object Collections.ArrayList
     foreach ($b in $Toolbar) {
         if ($b.ContainsKey('Sep')) { $mockBar.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null; continue }
-        if (-not (Get-IconFile $b.Icon)) { $missing += $b.Icon }
+        if (-not (Get-IconFile $b.Icon)) { [void]$missing.Add($b.Icon) }
         $img = Icon-For $b.Icon $size $script:Hires
         if ($b.Menu) {
             $drop = New-Object System.Windows.Forms.ToolStripDropDownButton($b.Text, $img)
@@ -232,7 +268,7 @@ function Refresh-Toolbar {
             foreach ($m in $b.Menu) {
                 if ($m.ContainsKey('Sep')) { $drop.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null; continue }
                 $MenuItem = $null
-                if ($m.Icon) { if (-not (Get-IconFile $m.Icon)) { $missing += $m.Icon }; $MenuItem = Icon-For $m.Icon 16 $false }
+                if ($m.Icon) { if (-not (Get-IconFile $m.Icon)) { [void]$missing.Add($m.Icon) }; $MenuItem = Icon-For $m.Icon 16 $false }
                 $drop.DropDownItems.Add((New-Object System.Windows.Forms.ToolStripMenuItem($m.Text, $MenuItem))) | Out-Null
             }
             $mockBar.Items.Add($drop) | Out-Null
@@ -242,15 +278,162 @@ function Refresh-Toolbar {
             $mockBar.Items.Add($btn) | Out-Null
         }
     }
-    $pageArea.BackColor = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.Color]::White }
-    $pageArea.Controls.Clear()
-    $hint = New-Object System.Windows.Forms.Label
-    $hint.Dock = 'Fill'; $hint.TextAlign = 'MiddleCenter'
-    $hint.ForeColor = if ($script:Dark) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::Black }
-    $t = "Thumbnail area (placeholder)`n`nEdit PNGs in NAPS2.Lib\Icons or colors in ColorScheme.cs,`nthen hit Refresh - no rebuild needed."
-    if ($missing.Count -gt 0) { $t += "`n`nMissing icons: " + (($missing | Sort-Object -Unique) -join ', ') }
-    $hint.Text = $t
-    $pageArea.Controls.Add($hint)
+    Refresh-WindowChrome $missing
+}
+
+function Pal($name, $fallbackLight, $fallbackDark) {
+    $s = $script:Swatches | Where-Object { $_.Name -eq $name } | Select-Object -First 1
+    if ($s) { if ($script:Dark) { return (Hex-ToColor $s.Dark) } else { return (Hex-ToColor $s.Light) } }
+    if ($script:Dark) { return $fallbackDark } else { return $fallbackLight }
+}
+
+function Refresh-WindowChrome($missing) {
+    $fore = Pal 'ForegroundColor' 'Black' 'White'
+    $back = Pal 'BackgroundColor' 'White' '262626'
+    $sep = Pal 'SeparatorColor' 'DDDDDD' '606060'
+    $hlBack = Pal 'HighlightBackgroundColor' 'CCE8FF' '28445B'
+    $hlBorder = Pal 'HighlightBorderColor' '60A0E8' '0078D4'
+
+    # Profiles toolbar (16px, icon before text, like UpdateProfilesToolbar)
+    $profilesBar.Items.Clear()
+    $profilesBar.ImageScalingSize = New-Object System.Drawing.Size(16, 16)
+    $profilesBar.BackColor = $mockBar.BackColor; $profilesBar.ForeColor = $mockBar.ForeColor
+    foreach ($p in $script:SampleProfiles) {
+        if (-not (Get-IconFile 'control_play_blue_small')) { $missing.Add('control_play_blue_small') }
+        $item = New-Object System.Windows.Forms.ToolStripButton($p, (Icon-For 'control_play_blue_small' 16 $false))
+        $item.TextImageRelation = 'ImageBeforeText'; $item.ForeColor = $mockBar.ForeColor
+        $profilesBar.Items.Add($item) | Out-Null
+    }
+    $sepLine.BackColor = $sep
+    $split.BackColor = $sep
+    $sidebarScroll.BackColor = $back
+    $contentPanel.BackColor = $back
+    $thumbFlow.BackColor = $back
+    $bottomBar.BackColor = $back
+
+    # Sidebar (mirrors Sidebar.CreateView: profile row, device, 4 dropdowns, Scan)
+    $sidebarScroll.Controls.Clear()
+    $addSide = {
+        param($c, $h)
+        $c.Dock = 'Top'; if ($h) { $c.Height = $h }; $sidebarScroll.Controls.Add($c)
+    }
+    $profileRow = New-Object System.Windows.Forms.Panel; $profileRow.Height = 28
+    $lblProfile = New-Object System.Windows.Forms.Label
+    $lblProfile.Text = 'Profile:'; $lblProfile.Dock = 'Fill'; $lblProfile.TextAlign = 'MiddleLeft'; $lblProfile.ForeColor = $fore
+    $btnEdit = New-Object System.Windows.Forms.Button
+    $btnEdit.Image = Icon-For 'pencil_small' 16 $false; $btnEdit.Width = 32; $btnEdit.Dock = 'Right'; $btnEdit.FlatStyle = 'Flat'
+    $btnNew = New-Object System.Windows.Forms.Button
+    $btnNew.Image = Icon-For 'add_small' 16 $false; $btnNew.Width = 32; $btnNew.Dock = 'Right'; $btnNew.FlatStyle = 'Flat'
+    foreach ($n in @('pencil_small', 'add_small')) { if (-not (Get-IconFile $n)) { $missing.Add($n) } }
+    $profileRow.Controls.Add($lblProfile); $profileRow.Controls.Add($btnNew); $profileRow.Controls.Add($btnEdit)
+    (& $addSide $profileRow 28)
+    $script:ProfileCombo = New-Object System.Windows.Forms.ComboBox
+    $script:ProfileCombo.DropDownStyle = 'DropDownList'
+    foreach ($p in $script:SampleProfiles) { $script:ProfileCombo.Items.Add($p) | Out-Null }
+    $script:ProfileCombo.SelectedIndex = 0
+    $script:ProfileCombo.BackColor = $back; $script:ProfileCombo.ForeColor = $fore
+    $script:ProfileCombo.Add_SelectedIndexChanged({ $form.Text = "NAPS2 - $($script:ProfileCombo.SelectedItem) (design preview)" })
+    (& $addSide $script:ProfileCombo 26)
+    $sp1 = New-Object System.Windows.Forms.Panel; (& $addSide $sp1 10)
+    $deviceRow = New-Object System.Windows.Forms.Panel; $deviceRow.Height = 44
+    $devIcon = New-Object System.Windows.Forms.PictureBox
+    $devIcon.Image = Icon-For 'scanner-96' 32 $false; $devIcon.Size = New-Object System.Drawing.Size(36, 36)
+    $devIcon.SizeMode = 'CenterImage'; $devIcon.Dock = 'Left'
+    if (-not (Get-IconFile 'scanner-96')) { $missing.Add('scanner-96') }
+    $devLabel = New-Object System.Windows.Forms.Label
+    $devLabel.Text = "G3070 series`nWIA"; $devLabel.Dock = 'Fill'; $devLabel.TextAlign = 'MiddleLeft'; $devLabel.ForeColor = $fore
+    $deviceRow.Controls.Add($devLabel); $deviceRow.Controls.Add($devIcon)
+    (& $addSide $deviceRow 44)
+    $sp2 = New-Object System.Windows.Forms.Panel; (& $addSide $sp2 10)
+    $fields = @(
+        @{ Label = 'Paper source:'; Items = @('Glass', 'Feeder', 'Duplex') },
+        @{ Label = 'Page size:'; Items = @('Letter', 'A4', 'Legal') },
+        @{ Label = 'Resolution:'; Items = @('100 DPI', '200 DPI', '300 DPI', '600 DPI') },
+        @{ Label = 'Bit depth:'; Items = @('24-bit Color', '8-bit Grayscale', '1-bit Black & White') }
+    )
+    foreach ($f in $fields) {
+        $cb = New-Object System.Windows.Forms.ComboBox
+        $cb.DropDownStyle = 'DropDownList'
+        foreach ($i in $f.Items) { $cb.Items.Add($i) | Out-Null }
+        $cb.SelectedIndex = 0; $cb.BackColor = $back; $cb.ForeColor = $fore
+        $lb = New-Object System.Windows.Forms.Label
+        $lb.Text = $f.Label; $lb.Height = 18; $lb.TextAlign = 'BottomLeft'; $lb.ForeColor = $fore
+        (& $addSide $cb 26); (& $addSide $lb 18)
+        $sp = New-Object System.Windows.Forms.Panel; (& $addSide $sp 6)
+    }
+    $btnScan = New-Object System.Windows.Forms.Button
+    $btnScan.Text = 'Scan'; $btnScan.Height = 36; $btnScan.Dock = 'Bottom'
+    $btnScan.Image = Icon-For 'control_play_blue_small' 16 $false; $btnScan.ImageAlign = 'MiddleLeft'; $btnScan.TextAlign = 'MiddleCenter'
+    $btnScan.Font = New-Object System.Drawing.Font($btnScan.Font, [System.Drawing.FontStyle]::Bold)
+    $btnScan.BackColor = $back; $btnScan.ForeColor = $fore
+    $sidebarScroll.Controls.Add($btnScan)
+
+    # Thumbnails (4 sample pages, click to select, palette highlight)
+    $thumbFlow.Controls.Clear()
+    $zoom = $script:ZoomLevels[$script:ZoomIdx]
+    $tw = [int](110 * $zoom / 100); $th = [int](150 * $zoom / 100)
+    for ($i = 0; $i -lt 4; $i++) {
+        $cell = New-Object System.Windows.Forms.Panel
+        $cell.Width = $tw + 20; $cell.Height = $th + 44; $cell.Margin = New-Object System.Windows.Forms.Padding(8)
+        $page = New-Object System.Windows.Forms.Panel
+        $page.Size = New-Object System.Drawing.Size($tw, $th); $page.Location = New-Object System.Drawing.Point(10, 6)
+        $page.BackColor = 'White'; $page.BorderStyle = 'FixedSingle'
+        $pg = New-Object System.Windows.Forms.Label
+        $pg.Text = "Page $($i + 1) sample"; $pg.Dock = 'Fill'; $pg.TextAlign = 'MiddleCenter'; $pg.ForeColor = 'Gray'
+        $page.Controls.Add($pg)
+        $cap = New-Object System.Windows.Forms.Label
+        $cap.Text = "Page $($i + 1)"; $cap.Dock = 'Bottom'; $cap.Height = 30; $cap.TextAlign = 'TopCenter'; $cap.ForeColor = $fore
+        $cell.Controls.Add($cap); $cell.Controls.Add($page)
+        if ($i -eq $script:SelectedThumb) { $cell.BackColor = $hlBack; $page.BorderStyle = 'FixedSingle' }
+        else { $cell.BackColor = $back }
+        $idx = $i
+        $cell.Add_Click({ $script:SelectedThumb = $idx; Refresh-Thumbs }.GetNewClosure())
+        $cell.Cursor = 'Hand'
+        $thumbFlow.Controls.Add($cell) | Out-Null
+    }
+
+    # Bottom bar (sidebar toggle + zoom, mirrors GetControlButtons)
+    $bottomBar.Controls.Clear()
+    $btnSide = New-Object System.Windows.Forms.Button
+    $btnSide.Image = Icon-For 'application_side_list_small' 16 $false; $btnSide.Width = 40; $btnSide.Dock = 'Left'; $btnSide.FlatStyle = 'Flat'
+    if (-not (Get-IconFile 'application_side_list_small')) { [void]$missing.Add('application_side_list_small') }
+    $btnSide.Add_Click({ $split.Panel1Collapsed = -not $split.Panel1Collapsed })
+    $zoomIn = New-Object System.Windows.Forms.Button
+    $zoomIn.Image = Icon-For 'zoom_in_small' 16 $false; $zoomIn.Width = 36; $zoomIn.Dock = 'Right'; $zoomIn.FlatStyle = 'Flat'
+    $zoomLabel = New-Object System.Windows.Forms.Label
+    $zoomLabel.Text = "$zoom%"; $zoomLabel.Width = 52; $zoomLabel.Dock = 'Right'; $zoomLabel.TextAlign = 'MiddleCenter'; $zoomLabel.ForeColor = $fore
+    $zoomOut = New-Object System.Windows.Forms.Button
+    $zoomOut.Image = Icon-For 'zoom_out_small' 16 $false; $zoomOut.Width = 36; $zoomOut.Dock = 'Right'; $zoomOut.FlatStyle = 'Flat'
+    foreach ($n in @('zoom_in_small', 'zoom_out_small')) { if (-not (Get-IconFile $n)) { $missing.Add($n) } }
+    $zoomIn.Add_Click({ $script:ZoomIdx = [Math]::Min(3, $script:ZoomIdx + 1); Refresh-Thumbs })
+    $zoomOut.Add_Click({ $script:ZoomIdx = [Math]::Max(0, $script:ZoomIdx - 1); Refresh-Thumbs })
+    $bottomBar.Controls.Add($btnSide); $bottomBar.Controls.Add($zoomIn); $bottomBar.Controls.Add($zoomLabel); $bottomBar.Controls.Add($zoomOut)
+
+    $form.Text = "NAPS2 - $($script:SampleProfiles[0]) (design preview)"
+    if ($missing.Count -gt 0) {
+        $statusLabel.Text += " | Missing icons: " + (($missing | Sort-Object -Unique) -join ', ')
+    }
+}
+
+function Refresh-Thumbs {
+    $fore = Pal 'ForegroundColor' 'Black' 'White'
+    $back = Pal 'BackgroundColor' 'White' '262626'
+    $hlBack = Pal 'HighlightBackgroundColor' 'CCE8FF' '28445B'
+    $zoom = $script:ZoomLevels[$script:ZoomIdx]
+    $tw = [int](110 * $zoom / 100); $th = [int](150 * $zoom / 100)
+    $i = 0
+    foreach ($cell in $thumbFlow.Controls) {
+        $cell.Width = $tw + 20; $cell.Height = $th + 44
+        $cell.BackColor = if ($i -eq $script:SelectedThumb) { $hlBack } else { $back }
+        foreach ($c in $cell.Controls) {
+            if ($c -is [System.Windows.Forms.Panel]) { $c.Size = New-Object System.Drawing.Size($tw, $th) }
+            if ($c -is [System.Windows.Forms.Label]) { $c.ForeColor = $fore }
+        }
+        $i++
+    }
+    foreach ($c in $bottomBar.Controls) {
+        if ($c -is [System.Windows.Forms.Label]) { $c.Text = "$zoom%"; $c.ForeColor = $fore }
+    }
 }
 
 function Refresh-Icons {
@@ -307,6 +490,7 @@ function Refresh-Palette {
 function Refresh-All {
     foreach ($img in $script:LoadedImages) { try { $img.Dispose() } catch {} }
     $script:LoadedImages = @()
+    $script:Swatches = (Parse-Colors).Swatches
     Refresh-Toolbar
     Refresh-Icons
     Refresh-Palette
