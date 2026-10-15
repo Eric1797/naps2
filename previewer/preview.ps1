@@ -8,7 +8,7 @@ Runs on built-in Windows PowerShell + .NET Framework WinForms. No SDK needed.
 
 Edit PNGs in NAPS2.Lib\Icons or hex values in ColorScheme.cs, hit Refresh.
 #>
-param([switch]$SelfTest)
+param([switch]$SelfTest, [switch]$TestRefresh)
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -72,7 +72,12 @@ function Get-IconFile($name, [switch]$Hires) {
     return $null
 }
 
-$script:LoadedImages = @()
+$script:LoadedImages = New-Object Collections.ArrayList
+$script:GridImages = New-Object Collections.ArrayList
+# All loaders append here; Refresh swaps the bin so old images are only
+# disposed AFTER the new controls replace them (never paint a dead image).
+$script:ImageBin = $null
+function Bin-Add($img) { if ($img -and $script:ImageBin -ne $null) { [void]$script:ImageBin.Add($img) } }
 function Load-Image($path) {
     if (-not $path) { return $null }
     try {
@@ -92,7 +97,7 @@ function Load-Image($path) {
     } catch {
         return $null
     }
-    $script:LoadedImages += $bmp
+    Bin-Add $bmp
     return $bmp
 }
 
@@ -101,7 +106,7 @@ function Resize-Image($img, $size) {
     $bmp = New-Object System.Drawing.Bitmap($size, $size)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     try { $g.DrawImage($img, 0, 0, $size, $size) } finally { $g.Dispose() }
-    $script:LoadedImages += $bmp
+    Bin-Add $bmp
     return $bmp
 }
 
@@ -112,7 +117,7 @@ function Placeholder($size) {
         $g.Clear([System.Drawing.Color]::Magenta)
         $g.DrawString('?', (New-Object System.Drawing.Font('Arial', $size * 0.7)), [System.Drawing.Brushes]::Black, 0, 0)
     } finally { $g.Dispose() }
-    $script:LoadedImages += $bmp
+    Bin-Add $bmp
     return $bmp
 }
 
@@ -447,8 +452,13 @@ function Refresh-Thumbs {
 }
 
 function Refresh-Icons {
-    $iconFlow.SuspendLayout()
-    $iconFlow.Controls.Clear()
+    $oldGrid = $script:GridImages
+    $script:GridImages = New-Object Collections.ArrayList
+    $prevBin = $script:ImageBin
+    $script:ImageBin = $script:GridImages
+    try {
+        $iconFlow.SuspendLayout()
+        $iconFlow.Controls.Clear()
     $filter = $searchBox.Text.Trim()
     $bg = if ($script:Dark) { Hex-ToColor '262626' } else { [System.Drawing.Color]::White }
     foreach ($f in (Get-ChildItem $IconsDir -Filter *.png | Sort-Object Name)) {
@@ -465,6 +475,10 @@ function Refresh-Icons {
         $iconFlow.Controls.Add($cell) | Out-Null
     }
     $iconFlow.ResumeLayout()
+    } finally {
+        $script:ImageBin = $prevBin
+        foreach ($img in $oldGrid) { try { $img.Dispose() } catch {} }
+    }
 }
 
 function Refresh-Palette {
@@ -498,12 +512,20 @@ function Refresh-Palette {
 }
 
 function Refresh-All {
-    foreach ($img in $script:LoadedImages) { try { $img.Dispose() } catch {} }
-    $script:LoadedImages = @()
-    $script:Swatches = (Parse-Colors).Swatches
-    Refresh-Toolbar
-    Refresh-Icons
-    Refresh-Palette
+    # Build the new UI first, dispose the old images after: controls on screen
+    # still reference them until replaced, and painting a disposed image
+    # throws "Parameter is not valid" (red X + error popup on toggle/refresh).
+    $old = $script:LoadedImages
+    $script:LoadedImages = New-Object Collections.ArrayList
+    $script:ImageBin = $script:LoadedImages
+    try {
+        $script:Swatches = (Parse-Colors).Swatches
+        Refresh-Toolbar
+        Refresh-Icons
+        Refresh-Palette
+    } finally {
+        foreach ($img in $old) { try { $img.Dispose() } catch {} }
+    }
     $n = @(Get-ChildItem $IconsDir -Filter *.png).Count
     $statusLabel.Text = "Root: $RepoRoot | Icons: $n files | Refreshed: $(Get-Date -Format T) (no rebuild)"
 }
@@ -517,6 +539,31 @@ $form.Controls.Add($tabs)
 $form.Controls.Add($top)
 $form.Controls.Add($status)
 
+if ($TestRefresh) {
+    # Headless refresh-cycle test: rebuilds + repaints repeatedly, exercising
+    # the dark/hires paths. Catches "paint a disposed image" regressions.
+    try {
+        Refresh-All
+        for ($k = 0; $k -lt 3; $k++) {
+            [System.Windows.Forms.Application]::DoEvents()
+            $shot = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+            try { $form.DrawToBitmap($shot, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height))) }
+            finally { $shot.Dispose() }
+            Refresh-All
+        }
+        $script:Dark = $true; Refresh-All
+        $script:Hires = $true; Refresh-All
+        [System.Windows.Forms.Application]::DoEvents()
+        $shot = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+        try { $form.DrawToBitmap($shot, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height))) }
+        finally { $shot.Dispose() }
+        Write-Output 'REFRESHTEST: PASS'
+        exit 0
+    } catch {
+        Write-Output ('REFRESHTEST: FAIL: ' + $_.Exception.Message)
+        exit 1
+    }
+}
 try {
     Refresh-All
 } catch {
