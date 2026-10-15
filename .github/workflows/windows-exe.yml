@@ -1,8 +1,10 @@
 name: Windows Portable
 
-# Windows-only PORTABLE build (no installer): produces the official portable zip
-# (NAPS2.Portable.exe launcher + App/ + Data/) via the repo's own NAPS2.Tools.
-# Use this while redesigning / adding features; other platforms are skipped for now.
+# Windows-only PORTABLE build (no installer): publishes just the Windows projects
+# and assembles the portable layout (NAPS2.Portable.exe launcher + App/ + Data/).
+# NOTE: we deliberately do NOT use `n2 build zip`, because building the full
+# solution also builds NAPS2.App.Mac, which needs the `macos` workload that
+# isn't available on Windows runners (NETSDK1147).
 # Download the zip from the run's Artifacts, extract, and run NAPS2.Portable.exe.
 
 on:
@@ -15,7 +17,7 @@ on:
 jobs:
   build-windows-portable:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -26,15 +28,31 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Build (Release-Zip config)
-        run: dotnet run --project NAPS2.Tools -- build zip -v
+      - name: Publish app + console (win-x64, ZIP/portable build)
+        run: |
+          dotnet publish NAPS2.App.WinForms -r win-x64 -c Release --self-contained true /p:DebugType=None /p:DebugSymbols=false /p:DefineConstants=ZIP -o portable/App
+          dotnet publish NAPS2.App.Console -r win-x64 -c Release --self-contained true /p:DebugType=None /p:DebugSymbols=false /p:DefineConstants=ZIP -o portable/App
 
-      - name: Package portable zip (no signing)
-        run: dotnet run --project NAPS2.Tools -- pkg zip -p win64 --nosign -v
+      - name: Publish worker (win-x86 single file, ZIP/portable build)
+        run: dotnet publish NAPS2.App.Worker -c Release /p:DebugType=None /p:DebugSymbols=false /p:DefineConstants=ZIP -o portable/worker
+
+      - name: Build portable launcher
+        run: |
+          dotnet build NAPS2.App.PortableLauncher -c Release --nologo
+          Copy-Item NAPS2.App.PortableLauncher/bin/Release/net462/NAPS2.Portable.exe portable/ -Force
+
+      - name: Assemble portable layout
+        shell: pwsh
+        run: |
+          Copy-Item portable/worker/NAPS2.Worker.exe portable/App/ -Force
+          if (Test-Path portable/App/_win32/naps2_jpeg.dll) { Copy-Item portable/App/_win32/naps2_jpeg.dll portable/App/ -Force }
+          New-Item -ItemType Directory -Path portable/Data -Force | Out-Null
+          Copy-Item LICENSE portable/license.txt -Force
+          Compress-Archive -Path portable/* -DestinationPath NAPS2-portable-win-x64.zip -Force
 
       - name: Upload portable zip
         uses: actions/upload-artifact@v4
         with:
           name: NAPS2-portable-win-x64
-          path: NAPS2.Setup/publish/**/naps2-*-win-x64.zip
+          path: NAPS2-portable-win-x64.zip
           if-no-files-found: error
