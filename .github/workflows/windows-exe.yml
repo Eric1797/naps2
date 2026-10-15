@@ -1,8 +1,9 @@
-name: Windows EXE
+name: Windows Portable
 
-# Windows-only build: compiles the WinForms desktop app (NAPS2.exe)
-# plus its background worker (NAPS2.Worker.exe) and uploads them as artifacts.
+# Windows-only PORTABLE build (no installer): produces the official portable zip
+# (NAPS2.Portable.exe launcher + App/ + Data/) via the repo's own NAPS2.Tools.
 # Use this while redesigning / adding features; other platforms are skipped for now.
+# Download the zip from the run's Artifacts, extract, and run NAPS2.Portable.exe.
 
 on:
   push:
@@ -12,9 +13,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows-exe:
+  build-windows-portable:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -25,30 +26,15 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Publish worker (win-x86, single file)
-        run: dotnet publish NAPS2.App.Worker -c Release /p:DebugType=None /p:DebugSymbols=false -o out/worker
+      - name: Build (Release-Zip config)
+        run: dotnet run --project NAPS2.Tools -- build zip -v
 
-      - name: Publish Windows app (win-x64)
-        run: dotnet publish NAPS2.App.WinForms -r win-x64 -c Release --self-contained true /p:DebugType=None /p:DebugSymbols=false -o out/windows-x64
+      - name: Package portable zip (no signing)
+        run: dotnet run --project NAPS2.Tools -- pkg zip -p win64 --nosign -v
 
-      - name: Copy worker next to app
-        shell: pwsh
-        run: Copy-Item out/worker/NAPS2.Worker.exe out/windows-x64/ -Force
-
-      - name: Zip output
-        shell: pwsh
-        run: Compress-Archive -Path out/windows-x64/* -DestinationPath NAPS2-windows-x64.zip -Force
-
-      - name: Upload EXE artifact (folder)
+      - name: Upload portable zip
         uses: actions/upload-artifact@v4
         with:
-          name: NAPS2-windows-x64
-          path: out/windows-x64/
-          if-no-files-found: error
-
-      - name: Upload EXE artifact (zip)
-        uses: actions/upload-artifact@v4
-        with:
-          name: NAPS2-windows-x64-zip
-          path: NAPS2-windows-x64.zip
+          name: NAPS2-portable-win-x64
+          path: NAPS2.Setup/publish/**/naps2-*-win-x64.zip
           if-no-files-found: error
