@@ -14,6 +14,16 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+$script:ErrLog = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Temp\preview-err2.log'
+function Log-Error($text) {
+    try { [IO.File]::AppendAllText($script:ErrLog, "[$(Get-Date -Format 'HH:mm:ss')] $text`r`n") } catch {}
+}
+[System.Windows.Forms.Application]::add_ThreadException({
+    param($sender, $e)
+    Log-Error $e.Exception.ToString()
+    [System.Windows.Forms.MessageBox]::Show($e.Exception.Message, 'Previewer error') | Out-Null
+})
+
 # --- repo locations (walk up from this script until NAPS2.Lib is found) ---
 $dir = $PSScriptRoot
 while ($dir -and -not (Test-Path (Join-Path $dir 'NAPS2.Lib'))) { $dir = Split-Path $dir -Parent }
@@ -507,5 +517,11 @@ $form.Controls.Add($tabs)
 $form.Controls.Add($top)
 $form.Controls.Add($status)
 
-Refresh-All
+try {
+    Refresh-All
+} catch {
+    Log-Error $_.Exception.ToString()
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Previewer startup error') | Out-Null
+    exit 1
+}
 [void]$form.ShowDialog()
